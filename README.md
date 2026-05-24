@@ -1,12 +1,38 @@
 # X For You Feed Algorithm — Deep Research Documentation
 
-A comprehensive technical deep-dive into X's open-source "For You" feed recommendation system, released May 2026. This documentation covers the full pipeline from architecture to ML models, filtering logic, scoring math, and non-obvious behaviors.
+Comprehensive technical documentation of X's open-source "For You" feed recommendation system.
+Source: [xai-org/x-algorithm](https://github.com/xai-org/x-algorithm)
 
-> **Source repo**: [xai-org/x-algorithm](https://github.com/xai-org/x-algorithm)
+**Public Q&A Page:** https://richeshgupta.github.io/x-algorithm-docs/
 
 ---
 
-## What's Inside
+## 5 Things That Will Surprise You
+
+**How badly does posting in a burst hurt reach?**
+Post 5 times in a row and your combined algorithmic weight is ~2.2 posts — the system applies an exponential decay multiplier to each successive post from the same author. (→ [Scoring & Ranking](docs/07-scoring-and-ranking.md#2c-author-diversity-attenuation))
+
+**Is scrolling past a post really tracked?**
+Yes. `not_dwelled` is a named negative engagement signal — every impression where a viewer scrolls past without pausing contributes a negative score to that post. (→ [Scoring & Ranking](docs/07-scoring-and-ranking.md))
+
+**Can a highly-liked post rank below a post with zero likes?**
+Yes. Net-negative posts (mutes + reports outweigh likes) are compressed into a score bucket below ALL positive-scoring posts, regardless of raw score magnitude. (→ [Scoring & Ranking](docs/07-scoring-and-ranking.md#2b-offset-normalization))
+
+**Why does posting off-topic hurt discovery so much?**
+The retrieval model uses vector embeddings — your posts cluster in a high-dimensional space. Scattered topics produce scattered embeddings, reducing how often you appear in similarity searches for any topic. (→ [Phoenix Retrieval](docs/04-phoenix-retrieval.md))
+
+**Does X read your post content before showing it?**
+Yes, but offline. The Grox pipeline pre-computes safety labels, spam scores, and semantic embeddings before your post enters the ranking queue. (→ [Grox](docs/06-grox.md))
+
+---
+
+## Use with AI
+
+Copy [`tips/ai-agent-guide.md`](tips/ai-agent-guide.md) into any AI assistant (Claude, ChatGPT, etc.) to get algorithm-backed advice on your X account. The guide gives the AI the full signal hierarchy, scoring math, and filter logic — so it can answer questions like "why is my reach dropping?" or "what's the optimal posting cadence for my niche?" with citations from the source code.
+
+---
+
+## Documentation
 
 | Doc | Description |
 |-----|-------------|
@@ -21,6 +47,21 @@ A comprehensive technical deep-dive into X's open-source "For You" feed recommen
 | [08 — Filtering](docs/08-filtering.md) | All 15 filters with logic, parameters, edge cases, and interaction table |
 | [09 — Decision Parameters](docs/09-decision-parameters.md) | Master reference: every param key, constant, and config value with type and effect |
 | [10 — Gotchas](docs/10-gotchas.md) | 30+ non-obvious behaviors, silent failures, and architectural surprises |
+
+---
+
+## Tips Guides
+
+Practical guides derived from the algorithm docs — all claims map to real scoring variables and filter logic:
+
+| Guide | Description |
+|-------|-------------|
+| [AI Agent Guide](tips/ai-agent-guide.md) | System prompt for AI assistants: turns any LLM into an algorithm-aware X advisor |
+| [What Kills Your Reach](tips/what-kills-your-reach.md) | Diagnostic guide: every filter, negative signal, and silent suppression mechanism |
+| [Maximum Engagement Playbook](tips/max-engagement-playbook.md) | Positive signal optimization: what the model actually rewards |
+| [Posting Cadence](tips/posting-cadence.md) | Author diversity decay math translated into posting frequency strategy |
+| [Content Format Guide](tips/content-format-guide.md) | How post structure (replies, quotes, media) affects scoring signals |
+| [Discovery and Reach](tips/discovery-and-reach.md) | How out-of-network retrieval works and how to optimize for it |
 
 ---
 
@@ -42,7 +83,21 @@ User Request
                └──► ScoredPost protos
 ```
 
-The system combines **in-network content** (posts from accounts you follow, served by Thunder) with **out-of-network content** (ML-discovered posts from a global corpus, served by Phoenix retrieval), scores everything with a **Grok-based transformer**, and assembles the final feed with ads and modules.
+In-network content (from accounts you follow) is served by Thunder. Out-of-network content (ML-discovered posts from a global corpus) is served by Phoenix retrieval. Both go through the same Grok-based transformer ranker before feed assembly.
+
+---
+
+## Scoring Formula
+
+```
+weighted_score = Σ(weight_i × P(action_i))
+              → author diversity attenuation
+              → OON weight factor (out-of-network posts only)
+              → offset normalization
+= final score
+```
+
+Positive actions (like, reply, repost, share, dwell) push scores up. Negative actions (block, mute, report, `not_dwelled`, not interested) push scores down. The offset normalization step ensures any net-negative post ranks below all net-positive posts in the final sort.
 
 ---
 
@@ -53,22 +108,9 @@ The system combines **in-network content** (posts from accounts you follow, serv
 | **No hand-engineered features** | The Grok transformer learns all relevance from raw engagement history. No manual feature pipelines. |
 | **Candidate isolation** | During ranking, posts cannot attend to each other — only to user context. Scores are batch-independent and cacheable. |
 | **Hash-based embeddings** | All IDs (users, posts, authors) use multiple hash functions. No vocabulary, no OOV problem. |
-| **Multi-action prediction** | The model predicts 14+ engagement types (like, reply, repost, block, mute, report, etc.). Negative actions get negative weights. |
-| **Two-pipeline architecture** | Inner pipeline handles ranking; outer pipeline handles feed assembly. Surfaces (For You, Topics, Ranked Following) reuse the inner pipeline. |
+| **Multi-action prediction** | The model predicts 14+ engagement types simultaneously. Negative actions get negative weights. |
+| **Two-pipeline architecture** | Inner pipeline handles ranking; outer pipeline handles feed assembly. Surfaces reuse the inner pipeline. |
 | **Offline content understanding** | Safety labels and embeddings (Grox) are pre-computed before serving, decoupling latency from classification cost. |
-
----
-
-## Scoring Formula
-
-```
-Final Score = Σ (weight_i × P(action_i))
-            → author diversity attenuation
-            → OON weight factor (for out-of-network posts)
-            → offset normalization
-```
-
-Positive actions (like, reply, repost, share) push scores up. Negative actions (block, mute, report, not interested) push scores down.
 
 ---
 
@@ -81,15 +123,6 @@ Positive actions (like, reply, repost, share) push scores up. Negative actions (
 | `thunder/` | Rust | In-memory in-network post store |
 | `phoenix/` | Python (JAX) | Two-tower retrieval + Grok transformer ranker |
 | `grox/` | Python (asyncio) | Offline safety, spam, embedding, ASR pipeline |
-
----
-
-## Who This Is For
-
-- **Engineers** building or debugging recommendation systems — see [Candidate Pipeline](docs/01-candidate-pipeline.md), [Scoring](docs/07-scoring-and-ranking.md), and [Gotchas](docs/10-gotchas.md)
-- **ML researchers** studying the model architecture — see [Phoenix Retrieval](docs/04-phoenix-retrieval.md) and [Phoenix Ranking](docs/05-phoenix-ranking.md)
-- **Product and policy teams** understanding what affects feed composition — see [Filtering](docs/08-filtering.md) and [Decision Parameters](docs/09-decision-parameters.md)
-- **AI agents** querying the system — each doc is structured for targeted lookup with explicit file references and cross-links
 
 ---
 

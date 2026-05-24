@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How the X For You Algorithm Actually Works</title>
+  <meta name="description" content="Algorithm-backed answers to the top questions X creators have about the For You feed, sourced from the open-source X recommendation algorithm codebase." />
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0f0f0f;
+      --bg-card:     #1a1a1a;
+      --bg-ai:       #161b22;
+      --border:      #2a2a2a;
+      --text:        #e7e7e7;
+      --muted:       #9b9b9b;
+      --accent:      #1d9bf0;
+      --accent-dim:  #1578c2;
+      --code-bg:     #0d1117;
+      --radius:      10px;
+      --font:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono:        "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:        #f5f5f5;
+        --bg-card:   #ffffff;
+        --bg-ai:     #eef4fb;
+        --border:    #d0d7de;
+        --text:      #1a1a1a;
+        --muted:     #555555;
+        --accent:    #1d9bf0;
+        --accent-dim:#1578c2;
+        --code-bg:   #e8ecf0;
+      }
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.65;
+      min-height: 100vh;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+
+    /* ── Layout wrapper ───────────────────────────────────────── */
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 60px 0 48px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      margin-bottom: 14px;
+    }
+
+    header p.subtitle {
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 580px;
+      margin: 0 auto 28px;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 10px 22px;
+      border-radius: 9999px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      transition: opacity 0.15s ease;
+    }
+    .btn:hover { opacity: 0.85; text-decoration: none; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    /* ── AI Agent Section ─────────────────────────────────────── */
+    .ai-section {
+      margin: 36px 0;
+    }
+
+    details.ai-details {
+      background: var(--bg-ai);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    details.ai-details summary {
+      cursor: pointer;
+      padding: 16px 20px;
+      font-weight: 600;
+      font-size: 0.97rem;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    details.ai-details summary::-webkit-details-marker { display: none; }
+
+    details.ai-details summary::after {
+      content: "▸";
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: var(--muted);
+      transition: transform 0.2s ease;
+    }
+    details.ai-details[open] summary::after {
+      transform: rotate(90deg);
+    }
+
+    .ai-body {
+      padding: 0 20px 20px;
+      border-top: 1px solid var(--border);
+      padding-top: 18px;
+    }
+
+    .ai-body p {
+      color: var(--muted);
+      font-size: 0.93rem;
+      margin-bottom: 14px;
+      line-height: 1.6;
+    }
+
+    .ai-body a { font-weight: 600; }
+
+    .ai-body pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: #c9d1d9;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.55;
+    }
+
+    @media (prefers-color-scheme: light) {
+      .ai-body pre { color: #24292f; }
+    }
+
+    /* ── Section labels ───────────────────────────────────────── */
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    section {
+      padding: 48px 0;
+    }
+
+    section h2 {
+      font-size: 1.45rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+
+    .section-intro {
+      color: var(--muted);
+      margin-bottom: 32px;
+      font-size: 0.97rem;
+    }
+
+    /* ── Q&A Grid ─────────────────────────────────────────────── */
+    .qa-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    @media (min-width: 660px) {
+      .qa-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .qa-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 22px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.15s ease;
+    }
+    .qa-card:hover { border-color: var(--accent-dim); }
+
+    .qa-card h3 {
+      font-size: 0.97rem;
+      font-weight: 700;
+      line-height: 1.35;
+      color: var(--text);
+    }
+
+    .qa-card p {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.65;
+      flex: 1;
+    }
+
+    .qa-card .deep-dive {
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 4px;
+      display: inline-block;
+    }
+    .qa-card .deep-dive:hover { text-decoration: underline; }
+
+    /* ── Tips Section ─────────────────────────────────────────── */
+    .tips-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    @media (min-width: 540px) {
+      .tips-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (min-width: 800px) {
+      .tips-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    .tip-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 0.15s ease;
+    }
+    .tip-card:hover { border-color: var(--accent-dim); }
+
+    .tip-card h3 {
+      font-size: 0.93rem;
+      font-weight: 700;
+    }
+
+    .tip-card p {
+      font-size: 0.87rem;
+      color: var(--muted);
+      flex: 1;
+      line-height: 1.55;
+    }
+
+    .tip-card a {
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 4px;
+    }
+
+    /* ── Divider ──────────────────────────────────────────────── */
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Footer ───────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 28px 0;
+      text-align: center;
+    }
+
+    footer p {
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.6;
+      max-width: 620px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header>
+    <div class="container">
+      <h1>How the X For You Algorithm Actually Works</h1>
+      <p class="subtitle">Answers sourced from the open-source X recommendation algorithm codebase</p>
+      <div class="btn-group">
+        <a class="btn btn-primary" href="https://github.com/richeshgupta/x-algorithm-docs" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn btn-secondary" href="https://github.com/richeshgupta/x-algorithm-docs/tree/main/docs" target="_blank" rel="noopener">Read Full Docs</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+
+      <!-- ── AI Agent Section ──────────────────────────────────── -->
+      <div class="ai-section">
+        <details class="ai-details">
+          <summary>🤖 Use with AI — Copy this into Claude, ChatGPT, or any AI assistant to optimize your X account</summary>
+          <div class="ai-body">
+            <p>
+              The <strong>ai-agent-guide.md</strong> is a structured navigation document designed for AI assistants.
+              It maps every question an X creator might ask to the specific documentation file and section that
+              answers it — so an AI can give you algorithm-backed advice without guessing.
+              <a href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/ai-agent-guide.md" target="_blank" rel="noopener">
+                Read the AI Agent Navigation Guide →
+              </a>
+            </p>
+            <p>Paste this system prompt into your AI assistant to get started:</p>
+            <pre>"You are an X account optimization consultant. Use the navigation guide at https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/ai-agent-guide.md to access the X algorithm documentation and give me algorithm-backed advice on my account."</pre>
+          </div>
+        </details>
+      </div>
+
+      <!-- ── Q&A Section ───────────────────────────────────────── -->
+      <section>
+        <p class="section-label">Top Questions</p>
+        <h2>Algorithm-Backed Answers</h2>
+        <p class="section-intro">Each answer is grounded in the open-source codebase — not speculation.</p>
+
+        <div class="qa-grid">
+
+          <div class="qa-card">
+            <h3>Why does my reach drop after posting 3–4 times quickly?</h3>
+            <p>
+              The algorithm applies an exponential author diversity penalty when multiple posts from the same
+              author appear in the same scoring batch. Your first post scores at full strength; your second at
+              ~55%; your third at ~33%; your fourth at ~21%. This is called author diversity decay and it
+              compounds — posting 5 times in a burst is algorithmically equivalent to about 1.4 posts worth
+              of reach.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/posting-cadence.md" target="_blank" rel="noopener">→ Deep dive: posting-cadence.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>Does video actually help your reach?</h3>
+            <p>
+              Only if it clears the minimum duration threshold. The algorithm has a dedicated <code>vqv</code>
+              (video quality view) signal, but it is gated — if your video is too short, the weight for that
+              signal becomes zero. A video below the threshold earns no <code>vqv</code> credit and still
+              risks the <code>not_dwelled</code> negative signal if viewers scroll past it.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/content-format-guide.md" target="_blank" rel="noopener">→ Deep dive: content-format-guide.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>What is the difference between For You and Following algorithmically?</h3>
+            <p>
+              The Following tab sets <code>in_network_only = true</code>, which disables Phoenix OON
+              retrieval entirely. Only Thunder (in-network posts from accounts you follow) serves candidates,
+              sorted purely by recency. No ML scoring selects what appears — it is chronological within a
+              2-day window.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/docs/00-overview.md" target="_blank" rel="noopener">→ Deep dive: 00-overview.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>Does the "Not Interested" button actually hurt you?</h3>
+            <p>
+              Yes. <code>not_interested_score</code> is a negative-weight signal in the scoring formula.
+              More importantly, posts that accumulate enough negative signals (not interested, mute, report)
+              cross an offset normalization cliff — they are placed in a score range below all
+              positive-scoring posts and cannot compete regardless of likes.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/what-kills-your-reach.md" target="_blank" rel="noopener">→ Deep dive: what-kills-your-reach.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>How does the algorithm decide to show your posts to non-followers?</h3>
+            <p>
+              Via Phoenix retrieval — a two-tower neural network that encodes your post into an embedding
+              vector (computed offline by Grox) and matches it against users' interest embeddings. Consistent
+              posting in a niche clusters your embeddings, making your posts easier to retrieve for similar
+              audiences. Once retrieved, your post still has to survive an OON score penalty before winning
+              a feed slot.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/discovery-and-reach.md" target="_blank" rel="noopener">→ Deep dive: discovery-and-reach.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>What is the single most important signal to optimize for?</h3>
+            <p>
+              Replies — because they are high-friction (require composition), a strong indicator of genuine
+              interest, and carry a dedicated positive weight. But the most damaging signal to avoid is
+              <code>not_dwelled</code> — the passive negative signal that fires on every impression where
+              the viewer scrolls past without stopping. Avoiding that signal is more important than chasing
+              any single positive one.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/max-engagement-playbook.md" target="_blank" rel="noopener">→ Deep dive: max-engagement-playbook.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>Does deleting and reposting reset your distribution?</h3>
+            <p>
+              No. The delete event is processed by the infrastructure (Thunder) via Kafka. The repost gets
+              a new Snowflake ID and zero inherited engagement. Engagement signals from the original post
+              (replies, likes, retweets) do not transfer. You start from scratch, with none of the previous
+              signal.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/posting-cadence.md" target="_blank" rel="noopener">→ Deep dive: posting-cadence.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>How long does a post stay in the algorithm?</h3>
+            <p>
+              In-network distribution has a hard 2-day (172,800 second) cutoff — Thunder trims posts older
+              than this from the serving store. The Phoenix pipeline's AgeFilter also hard-drops candidates
+              beyond a configured max age. There is no gradual fade — it is a binary cutoff. Posts do not
+              resurface algorithmically after aging out.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/posting-cadence.md" target="_blank" rel="noopener">→ Deep dive: posting-cadence.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>Do hashtags help?</h3>
+            <p>
+              Not directly through a hashtag-specific signal in scoring — the algorithm does not have a
+              hashtag weight. Hashtags can help indirectly through topic classification
+              (<code>filtered_topic_ids</code> assigned to your post) and by attracting the right audience
+              (reducing <code>not_dwelled</code> signals). However, commonly-muted hashtag terms will cause
+              your post to be filtered out for viewers who have muted those keywords.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/docs/08-filtering.md" target="_blank" rel="noopener">→ Deep dive: 08-filtering.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>Why do some replies get more reach than standalone posts?</h3>
+            <p>
+              They should not, structurally — replies face additional in-network filtering (Thunder only
+              includes replies if the replied-to post is a root post, or the replied-to user is in the
+              viewer's following list). However, replies to high-engagement threads inherit visibility from
+              the parent thread's audience, which is a different distribution path than the algorithmic feed.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/docs/03-thunder.md" target="_blank" rel="noopener">→ Deep dive: 03-thunder.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>Does your follower count affect how the algorithm weights you?</h3>
+            <p>
+              Not directly in the scoring formula — the scoring formula is purely engagement probability
+              weighted sum. However, new accounts get routed to a different Phoenix retrieval cluster
+              (new-user inference cluster) and receive a hardcoded OON weight factor that cannot be tuned
+              at runtime. Establishing engagement history is the fastest path out of the new-user treatment.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/discovery-and-reach.md" target="_blank" rel="noopener">→ Deep dive: discovery-and-reach.md</a>
+          </div>
+
+          <div class="qa-card">
+            <h3>What can silently remove your post before anyone sees it?</h3>
+            <p>
+              Multiple pre-scoring filters run before ranking: AuthorSocialgraphFilter (mutes, blocks —
+              bidirectional), MutedKeywordFilter (token-based keyword matching), AgeFilter
+              (Snowflake-derived age), PreviouslySeenPostsFilter (bloom filter + exact ID). After ranking,
+              VFFilter (post-selection) removes posts flagged by Grox's offline safety classifier — a post
+              can score highly and still be removed.
+            </p>
+            <a class="deep-dive" href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/what-kills-your-reach.md" target="_blank" rel="noopener">→ Deep dive: what-kills-your-reach.md</a>
+          </div>
+
+        </div>
+      </section>
+
+      <hr />
+
+      <!-- ── Tips Section ───────────────────────────────────────── -->
+      <section>
+        <p class="section-label">Guides</p>
+        <h2>Creator Tips — By Topic</h2>
+        <p class="section-intro">Each guide distills the relevant algorithm mechanics into actionable advice.</p>
+
+        <div class="tips-grid">
+
+          <div class="tip-card">
+            <h3>Posting Cadence</h3>
+            <p>When to post, how often, and why burst-posting destroys your reach through author diversity decay.</p>
+            <a href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/posting-cadence.md" target="_blank" rel="noopener">Read guide →</a>
+          </div>
+
+          <div class="tip-card">
+            <h3>Content Format Guide</h3>
+            <p>How the algorithm treats text, images, video, and links differently — and which formats carry gated signals.</p>
+            <a href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/content-format-guide.md" target="_blank" rel="noopener">Read guide →</a>
+          </div>
+
+          <div class="tip-card">
+            <h3>Discovery and Reach</h3>
+            <p>How Phoenix retrieval works and how to cluster your embeddings for out-of-network distribution.</p>
+            <a href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/discovery-and-reach.md" target="_blank" rel="noopener">Read guide →</a>
+          </div>
+
+          <div class="tip-card">
+            <h3>Max Engagement Playbook</h3>
+            <p>Signal-by-signal breakdown of what earns the most weight, and how to avoid the passive negative signals that silently kill reach.</p>
+            <a href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/max-engagement-playbook.md" target="_blank" rel="noopener">Read guide →</a>
+          </div>
+
+          <div class="tip-card">
+            <h3>What Kills Your Reach</h3>
+            <p>Every filter, negative signal, and classifier that can remove or downrank your post — before and after scoring.</p>
+            <a href="https://github.com/richeshgupta/x-algorithm-docs/blob/main/tips/what-kills-your-reach.md" target="_blank" rel="noopener">Read guide →</a>
+          </div>
+
+        </div>
+      </section>
+
+    </div><!-- /.container -->
+  </main>
+
+  <!-- ── Footer ──────────────────────────────────────────────────── -->
+  <footer>
+    <div class="container">
+      <p>
+        Documentation sourced from the open-source X recommendation algorithm.
+        Original source:
+        <a href="https://github.com/xai-org/x-algorithm" target="_blank" rel="noopener">xai-org/x-algorithm</a>
+        (Apache 2.0). Analysis and documentation by
+        <a href="https://github.com/richeshgupta" target="_blank" rel="noopener">Richesh Gupta</a>.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
